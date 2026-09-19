@@ -7,9 +7,9 @@ This guide walks you through every step of migrating an enterprise **Heterogeneo
 ## Lab Prerequisites
 
 1. **AWS Account**: Active account with administrative privileges.
-2. **AWS CLI**: Installed and configured locally (`aws configure`).
-3. **Region**: Recommended `us-east-1` (N. Virginia) or `us-west-2` (Oregon).
-4. **Knowledge Level**: Basic familiarity with EC2, VPC, IIS, NGINX, Linux Bash, and Windows PowerShell.
+2. **AWS CLI**: Installed and configured (`aws configure`).
+3. **Shell Environment**: You can use either **Linux / WSL (Ubuntu / Bash)** or **Windows (PowerShell)**.
+4. **Region**: Recommended `us-east-1` (N. Virginia) or `us-west-2` (Oregon).
 
 ---
 
@@ -33,24 +33,49 @@ Before installing agents, MGN must be initialized in your chosen AWS Region.
 
 ## Step 2: Deploy CloudFormation Stacks
 
-Deploy the 4 CloudFormation modules in order:
+> [!IMPORTANT]
+> - In **Linux / WSL (Bash)**: Line continuations use `\` and template paths must start with `file://`.
+> - In **Windows (PowerShell)**: Line continuations use `` ` ``.
 
 ### 2.1 Deploy Module 01: Dual-VPC Networking
-Creates the Source VPC (`10.0.0.0/16`) and Target VPC (`10.1.0.0/16`), subnets, and security groups.
 
+**For Linux / WSL (Bash):**
+```bash
+aws cloudformation create-stack \
+  --stack-name mgn-lab-01-networking \
+  --template-body file://cft/01-networking.yaml
+
+# Wait for completion:
+aws cloudformation wait stack-create-complete --stack-name mgn-lab-01-networking
+echo "Module 01 Deployed Successfully!"
+```
+
+**For Windows (PowerShell):**
 ```powershell
 aws cloudformation create-stack `
   --stack-name mgn-lab-01-networking `
   --template-body file://cft/01-networking.yaml
 
-# Wait for completion:
 aws cloudformation wait stack-create-complete --stack-name mgn-lab-01-networking
 Write-Host "Module 01 Deployed Successfully!" -ForegroundColor Green
 ```
 
-### 2.2 Deploy Module 02: IAM Roles & Policies
-Creates instance profiles for Windows/Linux instances and the dedicated agent installer user.
+---
 
+### 2.2 Deploy Module 02: IAM Roles & Policies
+
+**For Linux / WSL (Bash):**
+```bash
+aws cloudformation create-stack \
+  --stack-name mgn-lab-02-iam \
+  --template-body file://cft/02-iam-roles.yaml \
+  --capabilities CAPABILITY_NAMED_IAM
+
+aws cloudformation wait stack-create-complete --stack-name mgn-lab-02-iam
+echo "Module 02 Deployed Successfully!"
+```
+
+**For Windows (PowerShell):**
 ```powershell
 aws cloudformation create-stack `
   --stack-name mgn-lab-02-iam `
@@ -61,9 +86,22 @@ aws cloudformation wait stack-create-complete --stack-name mgn-lab-02-iam
 Write-Host "Module 02 Deployed Successfully!" -ForegroundColor Green
 ```
 
-### 2.3 Deploy Module 03: Source Web Group (1x Windows + 1x Linux)
-Provisions **Node-01 (Windows Server 2022 with IIS)** and **Node-02 (Amazon Linux 2023 with NGINX)** behind an Application Load Balancer.
+---
 
+### 2.3 Deploy Module 03: Source Web Group (1x Windows + 1x Linux)
+
+**For Linux / WSL (Bash):**
+```bash
+aws cloudformation create-stack \
+  --stack-name mgn-lab-03-source-webgroup \
+  --template-body file://cft/03-source-windows-webgroup.yaml
+
+echo "Creating Web Group (Takes ~4 minutes for OS initialization)..."
+aws cloudformation wait stack-create-complete --stack-name mgn-lab-03-source-webgroup
+echo "Module 03 Deployed Successfully!"
+```
+
+**For Windows (PowerShell):**
 ```powershell
 aws cloudformation create-stack `
   --stack-name mgn-lab-03-source-webgroup `
@@ -74,9 +112,21 @@ aws cloudformation wait stack-create-complete --stack-name mgn-lab-03-source-web
 Write-Host "Module 03 Deployed Successfully!" -ForegroundColor Green
 ```
 
-### 2.4 Deploy Module 04: Target Launch Template & Target ALB
-Provisions the target ALB and launch configuration for post-migration cutover.
+---
 
+### 2.4 Deploy Module 04: Target Launch Template & Target ALB
+
+**For Linux / WSL (Bash):**
+```bash
+aws cloudformation create-stack \
+  --stack-name mgn-lab-04-target \
+  --template-body file://cft/04-target-launch-template.yaml
+
+aws cloudformation wait stack-create-complete --stack-name mgn-lab-04-target
+echo "Module 04 Deployed Successfully!"
+```
+
+**For Windows (PowerShell):**
 ```powershell
 aws cloudformation create-stack `
   --stack-name mgn-lab-04-target `
@@ -92,6 +142,21 @@ Write-Host "Module 04 Deployed Successfully!" -ForegroundColor Green
 
 Retrieve the Source ALB URL and verify that both Windows IIS and Linux NGINX nodes are serving traffic.
 
+**In Linux / WSL (Bash):**
+```bash
+SOURCE_ALB_URL=$(aws cloudformation describe-stacks \
+  --stack-name mgn-lab-03-source-webgroup \
+  --query "Stacks[0].Outputs[?OutputKey=='WebGroupAlbUrl'].OutputValue" \
+  --output text)
+
+echo "Source Web Group URL: $SOURCE_ALB_URL"
+
+# Run the Bash verification test script:
+chmod +x ./scripts/verify-migration.sh
+./scripts/verify-migration.sh "$SOURCE_ALB_URL" "" 6
+```
+
+**In Windows (PowerShell):**
 ```powershell
 $sourceAlbUrl = (aws cloudformation describe-stacks `
   --stack-name mgn-lab-03-source-webgroup `
@@ -100,11 +165,10 @@ $sourceAlbUrl = (aws cloudformation describe-stacks `
 
 Write-Host "Source Web Group URL: $sourceAlbUrl" -ForegroundColor Cyan
 
-# Test the source endpoint using the verification script:
 .\scripts\verify-migration.ps1 -SourceEndpoint $sourceAlbUrl -Iterations 6
 ```
 
-Open `$sourceAlbUrl` in your web browser. Refresh multiple times:
+Open the URL in your web browser. Refresh multiple times:
 - **Node-01 (Windows)** displays a **Blue** card showing *IIS 10.0 Online*.
 - **Node-02 (Linux)** displays a **Green** card showing *NGINX Online*.
 
@@ -114,6 +178,20 @@ Open `$sourceAlbUrl` in your web browser. Refresh multiple times:
 
 Generate an Access Key ID and Secret Access Key for the `mgn-lab-agent-installer` user created in Module 02.
 
+**In Linux / WSL (Bash):**
+```bash
+CREDENTIALS=$(aws iam create-access-key --user-name mgn-lab-agent-installer --output json)
+
+export AWS_ACCESS_KEY_ID=$(echo "$CREDENTIALS" | grep -o '"AccessKeyId": "[^"]*' | cut -d'"' -f4)
+export AWS_SECRET_ACCESS_KEY=$(echo "$CREDENTIALS" | grep -o '"SecretAccessKey": "[^"]*' | cut -d'"' -f4)
+
+echo "=== SAVE THESE CREDENTIALS FOR AGENT INSTALLATION ==="
+echo "AWS_ACCESS_KEY_ID     : $AWS_ACCESS_KEY_ID"
+echo "AWS_SECRET_ACCESS_KEY : $AWS_SECRET_ACCESS_KEY"
+echo "===================================================="
+```
+
+**In Windows (PowerShell):**
 ```powershell
 $credentials = aws iam create-access-key --user-name mgn-lab-agent-installer | ConvertFrom-Json
 
@@ -145,7 +223,7 @@ In the Session Manager PowerShell session on **`mgn-lab-source-web-node-01-windo
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 Invoke-WebRequest -Uri "https://s3.us-west-2.amazonaws.com/aws-discovery-agent.us-west-2/windows/latest/AWSDiscoveryAgentInstaller.exe" -OutFile "C:\AWSDiscoveryAgentInstaller.exe"
 
-# Replace credentials:
+# Replace <YOUR_ACCESS_KEY_ID> and <YOUR_SECRET_ACCESS_KEY> with credentials from Step 4:
 .\AWSDiscoveryAgentInstaller.exe REGION="us-east-1" KEY_ID="<YOUR_ACCESS_KEY_ID>" KEY_SECRET="<YOUR_SECRET_ACCESS_KEY>" /q
 
 # Verify Service
@@ -162,7 +240,7 @@ mkdir -p /tmp/discovery && cd /tmp/discovery
 curl -s -O https://s3-us-west-2.amazonaws.com/aws-discovery-agent.us-west-2/linux/latest/aws-discovery-agent.tar.gz
 tar -xzf aws-discovery-agent.tar.gz
 
-# Replace credentials:
+# Replace <YOUR_ACCESS_KEY_ID> and <YOUR_SECRET_ACCESS_KEY> with credentials from Step 4:
 sudo bash install -r us-east-1 -k "<YOUR_ACCESS_KEY_ID>" -s "<YOUR_SECRET_ACCESS_KEY>"
 
 # Verify Service
@@ -289,6 +367,20 @@ Cutover stops active replication, syncs final block deltas, and launches the pro
 
 Run the verification test suite against both the Source ALB and Target ALB:
 
+**In Linux / WSL (Bash):**
+```bash
+TARGET_ALB_URL=$(aws cloudformation describe-stacks \
+  --stack-name mgn-lab-04-target \
+  --query "Stacks[0].Outputs[?OutputKey=='TargetAlbUrl'].OutputValue" \
+  --output text)
+
+echo "Target Migrated Web Group URL: $TARGET_ALB_URL"
+
+# Run full comparative validation across both Windows and Linux target nodes:
+./scripts/verify-migration.sh "$SOURCE_ALB_URL" "$TARGET_ALB_URL" 10
+```
+
+**In Windows (PowerShell):**
 ```powershell
 $targetAlbUrl = (aws cloudformation describe-stacks `
   --stack-name mgn-lab-04-target `
@@ -297,7 +389,6 @@ $targetAlbUrl = (aws cloudformation describe-stacks `
 
 Write-Host "Target Migrated Web Group URL: $targetAlbUrl" -ForegroundColor Green
 
-# Run full comparative validation across both Windows and Linux target nodes:
 .\scripts\verify-migration.ps1 `
   -SourceEndpoint $sourceAlbUrl `
   -TargetEndpoint $targetAlbUrl `
@@ -312,6 +403,23 @@ Both target instances (Windows Node 01 and Linux Node 02) will respond with `HTT
 
 To prevent ongoing AWS charges, delete resources in the following order:
 
+**In Linux / WSL (Bash):**
+```bash
+# 1. Delete IAM Access Keys created in Step 4
+aws iam delete-access-key --user-name mgn-lab-agent-installer --access-key-id "$AWS_ACCESS_KEY_ID"
+
+# 2. In MGN Console: Select Source Servers -> Actions -> "Disconnect from service" -> "Archive"
+
+# 3. Delete CloudFormation Stacks (Reverse order)
+aws cloudformation delete-stack --stack-name mgn-lab-04-target
+aws cloudformation delete-stack --stack-name mgn-lab-03-source-webgroup
+aws cloudformation delete-stack --stack-name mgn-lab-02-iam
+aws cloudformation delete-stack --stack-name mgn-lab-01-networking
+
+echo "Cleanup initiated successfully!"
+```
+
+**In Windows (PowerShell):**
 ```powershell
 # 1. Delete IAM Access Keys created in Step 4
 aws iam delete-access-key --user-name mgn-lab-agent-installer --access-key-id $accessKeyId
