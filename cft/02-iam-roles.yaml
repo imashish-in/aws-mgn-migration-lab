@@ -70,9 +70,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - discovery:StartDataCollectionByAgentIds
-                  - discovery:DescribeAgents
-                  - discovery:RegisterAgent
+                  - discovery:*
+                  - mgh:*
                 Resource: '*'
       Tags:
         - Key: Name

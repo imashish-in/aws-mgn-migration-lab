@@ -79,7 +79,7 @@ flowchart TB
 | Phase | Action | Description |
 |---|---|---|
 | **Phase 1** | **Infrastructure Provisioning** | Deploy CFT modules 01 through 04 to create the dual-VPC architecture, IAM roles, source heterogeneous web group (Windows + Linux), and target load balancer. |
-| **Phase 2** | **Application Discovery** | Install the AWS Application Discovery Agent on both Windows and Linux to discover system performance and group servers in Migration Hub. |
+| **Phase 2** | **Application Discovery** | Install the AWS Application Discovery Agent on both Windows and Linux to collect performance telemetry and inspect inventory via AWS Transform / Discovery CLI. |
 | **Phase 3** | **Continuous Data Replication** | Install the AWS Application Migration Service (MGN) agent on both Windows and Linux nodes to initiate continuous block-level sync. |
 | **Phase 4** | **Test Launch & Validation** | Launch Test Instances in the Target VPC and verify IIS and NGINX application integrity. |
 | **Phase 5** | **Cutover Migration** | Finalize replication, perform Cutover launch, register instances to the Target ALB, and mark migration complete. |

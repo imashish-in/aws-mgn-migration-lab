@@ -250,6 +250,22 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          # 1. Expand XFS filesystem to full 20GB EBS size
+          xfs_growfs / 2>/dev/null || true
+
+          # 2. Configure 2GB Swapfile (Prevents OOM during agent installs on t3.micro)
+          if [ ! -f /swapfile ]; then
+              dd if=/dev/zero of=/swapfile bs=128M count=16
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+          fi
+
+          # 3. Unmount tmpfs from /tmp so it uses the 19GB root EBS volume
+          umount /tmp 2>/dev/null || true
+
+          # 4. Install NGINX and Python tools
           dnf update -y
           dnf install -y nginx python3-pip
 

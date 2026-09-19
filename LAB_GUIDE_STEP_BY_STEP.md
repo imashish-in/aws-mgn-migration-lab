@@ -182,13 +182,13 @@ Generate an Access Key ID and Secret Access Key for the `mgn-lab-agent-installer
 ```bash
 CREDENTIALS=$(aws iam create-access-key --user-name mgn-lab-agent-installer --output json)
 
-export AWS_ACCESS_KEY_ID=$(echo "$CREDENTIALS" | grep -o '"AccessKeyId": "[^"]*' | cut -d'"' -f4)
-export AWS_SECRET_ACCESS_KEY=$(echo "$CREDENTIALS" | grep -o '"SecretAccessKey": "[^"]*' | cut -d'"' -f4)
+INSTALLER_KEY_ID=$(echo "$CREDENTIALS" | grep -o '"AccessKeyId": "[^"]*' | cut -d'"' -f4)
+INSTALLER_SECRET_KEY=$(echo "$CREDENTIALS" | grep -o '"SecretAccessKey": "[^"]*' | cut -d'"' -f4)
 
-echo "=== SAVE THESE CREDENTIALS FOR AGENT INSTALLATION ==="
-echo "AWS_ACCESS_KEY_ID     : $AWS_ACCESS_KEY_ID"
-echo "AWS_SECRET_ACCESS_KEY : $AWS_SECRET_ACCESS_KEY"
-echo "===================================================="
+echo "=== SAVE THESE CREDENTIALS FOR AGENT INSTALLATION ON EC2 ==="
+echo "AGENT_KEY_ID     : $INSTALLER_KEY_ID"
+echo "AGENT_SECRET_KEY : $INSTALLER_SECRET_KEY"
+echo "==========================================================="
 ```
 
 **In Windows (PowerShell):**
@@ -224,7 +224,7 @@ In the Session Manager PowerShell session on **`mgn-lab-source-web-node-01-windo
 Invoke-WebRequest -Uri "https://s3.us-west-2.amazonaws.com/aws-discovery-agent.us-west-2/windows/latest/AWSDiscoveryAgentInstaller.exe" -OutFile "C:\AWSDiscoveryAgentInstaller.exe"
 
 # Replace <YOUR_ACCESS_KEY_ID> and <YOUR_SECRET_ACCESS_KEY> with credentials from Step 4:
-.\AWSDiscoveryAgentInstaller.exe REGION="us-east-1" KEY_ID="<YOUR_ACCESS_KEY_ID>" KEY_SECRET="<YOUR_SECRET_ACCESS_KEY>" /q
+C:\AWSDiscoveryAgentInstaller.exe REGION="us-east-1" KEY_ID="<YOUR_ACCESS_KEY_ID>" KEY_SECRET="<YOUR_SECRET_ACCESS_KEY>" /q
 
 # Verify Service
 Get-Service -Name "AWSDiscoveryAgent"
@@ -247,14 +247,38 @@ sudo bash install -r us-east-1 -k "<YOUR_ACCESS_KEY_ID>" -s "<YOUR_SECRET_ACCESS
 sudo systemctl status aws-discovery-daemon --no-pager
 ```
 
----
+### 5.4 Verify Discovered Servers (AWS Transform & AWS CLI)
 
-### 5.4 View in AWS Migration Hub Console
-1. Navigate to **AWS Migration Hub** -> **Discovery** -> **Servers**.
-2. Within 5-10 minutes, both the Windows node and Linux node will appear with their Hostnames, IP addresses, OS versions, and hardware specs.
-3. Select both servers -> Click **Group as application** -> Name it `Web-Cluster-App`.
+> [!NOTE]
+> **Console Notice**: AWS Migration Hub has transitioned to **[AWS Transform](https://aws.amazon.com/transform/)** for new customers. You can view and manage your discovered inventory via **AWS Transform**, the **AWS Application Discovery Service** console, or directly via the **AWS CLI**.
 
----
+#### Verify via AWS CLI (Fastest & Direct):
+Run this in your local terminal to inspect registered discovery agents:
+
+**In Linux / WSL (Bash):**
+```bash
+aws discovery describe-agents \
+  --query "agentsInfo[*].[agentId,hostName,agentHealth,version,osVersion]" \
+  --output table
+```
+
+**In Windows (PowerShell):**
+```powershell
+aws discovery describe-agents `
+  --query "agentsInfo[*].[agentId,hostName,agentHealth,version,osVersion]" `
+  --output table
+```
+
+#### Expected Output:
+You will see both `mgn-lab-source-web-node-01-windows` and `mgn-lab-source-web-node-02-linux` reporting with `agentHealth: HEALTHY`.
+
+#### View Telemetry & Configurations:
+```bash
+# View system hardware & OS configurations collected by the agents
+aws discovery describe-configurations \
+  --configuration-ids $(aws discovery list-configurations --configuration-type SERVER --query "configurations[*].['server.configurationId']" --output text) \
+  --output json
+```
 
 ## Step 6: Install AWS Application Migration Service (MGN) Agent
 
@@ -283,17 +307,31 @@ In the Session Manager Bash terminal on **`mgn-lab-source-web-node-02-linux`**:
 ```bash
 REGION="us-east-1" # Replace with your lab region
 
+# 1. Expand XFS filesystem
+sudo xfs_growfs / 2>/dev/null || true
+
+# 2. Configure 2GB Swap (Prevents OOM during agent install on t3.micro)
+if [ ! -f /swapfile ]; then
+    sudo dd if=/dev/zero of=/swapfile bs=128M count=16
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+fi
+
+# 3. Unmount tmpfs from /tmp so installer uses root EBS volume
+sudo umount /tmp 2>/dev/null || true
+
+# 4. Download and run installer:
 mkdir -p /tmp/mgn && cd /tmp/mgn
 curl -s -O "https://aws-application-migration-service-${REGION}.s3.${REGION}.amazonaws.com/latest/linux/aws-replication-installer-init.py"
 
-# Run Installer:
 sudo python3 aws-replication-installer-init.py \
     --region "$REGION" \
-    --aws-access-key-id "<YOUR_ACCESS_KEY_ID>" \
-    --aws-secret-access-key "<YOUR_SECRET_ACCESS_KEY>" \
+    --aws-access-key-id "<YOUR_AGENT_KEY_ID>" \
+    --aws-secret-access-key "<YOUR_AGENT_SECRET_KEY>" \
     --no-prompt
 
-# Verify Service
+# 5. Verify Service Status
 sudo systemctl status aws-replication-service --no-pager
 ```
 

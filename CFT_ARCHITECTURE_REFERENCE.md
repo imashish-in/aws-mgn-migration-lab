@@ -92,7 +92,7 @@ Provisions the Identity and Access Management (IAM) roles, instance profiles, an
 3. **`MigrationAgentInstallerUser` (`AWS::IAM::User`)**:
    - Dedicated service user (`mgn-lab-agent-installer`).
    - Attached with `AWSApplicationMigrationAgentInstallationPolicy`.
-   - Grants permissions to register agents with Application Discovery Service.
+   - Grants full Discovery & Migration Hub permissions (`discovery:*`, `mgh:*`) to register agents and query configurations.
    - Used in Step 4 of the lab to generate programmatic Access Keys for agent installation.
 
 ---

@@ -19,6 +19,20 @@ echo "=========================================================="
 echo "  Installing AWS Application Migration Service (MGN) Agent"
 echo "=========================================================="
 
+# 1. Expand XFS filesystem
+sudo xfs_growfs / 2>/dev/null || true
+
+# 2. Configure 2GB Swapfile (Prevents OOM during agent download and kernel driver compilation)
+if [ ! -f /swapfile ]; then
+    sudo dd if=/dev/zero of=/swapfile bs=128M count=16
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile
+    sudo swapon /swapfile
+fi
+
+# 3. Unmount tmpfs from /tmp so installer uses root EBS disk
+sudo umount /tmp 2>/dev/null || true
+
 WORK_DIR="/tmp/aws-mgn"
 mkdir -p "$WORK_DIR"
 cd "$WORK_DIR"
