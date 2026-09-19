@@ -8,44 +8,44 @@ An end-to-end hands-on laboratory project designed to simulate an **On-Premises 
 
 ```mermaid
 flowchart TB
-    subgraph Source_Environment ["Source Environment (Simulated On-Premises)"]
-        SourceALB["Source Application Load Balancer<br>(HTTP :80)"]
+    subgraph Source_Env ["Source Environment - Simulated On-Premises"]
+        SourceALB["Source Application Load Balancer (HTTP :80)"]
         subgraph SourceVPC ["Source VPC (10.0.0.0/16)"]
-            Node1["Windows Web Node 01<br>(IIS + Windows Server 2022)<br>• ADS Agent (MSI)<br>• MGN Agent (.exe)"]
-            Node2["Linux Web Node 02<br>(NGINX + Amazon Linux 2023)<br>• ADS Agent (tar.gz)<br>• MGN Agent (Python)"]
+            Node1["Windows Web Node 01<br/>(IIS 10 + Windows 2022)<br/>ADS Agent + MGN Agent"]
+            Node2["Linux Web Node 02<br/>(NGINX + Amazon Linux 2023)<br/>ADS Agent + MGN Agent"]
         end
         SourceALB --> Node1
         SourceALB --> Node2
     end
 
     subgraph AWS_Discovery ["AWS Migration Hub & Discovery Service"]
-        ADS["Application Discovery Service<br>• System Specifications<br>• Performance Telemetry<br>• Network Connections"]
+        ADS["Application Discovery Service<br/>- Performance Telemetry<br/>- Process & Network Mapping"]
     end
 
     subgraph AWS_MGN_Service ["AWS Application Migration Service (MGN)"]
         subgraph StagingArea ["Replication Staging Area"]
             RepServer1["Replication Server (t3.small)"]
-            StagingEBS1["Replicated EBS Volumes (Staging)"]
+            StagingEBS1["Replicated Staging EBS Volumes"]
             RepServer1 --- StagingEBS1
         end
     end
 
-    subgraph Target_Environment ["Target AWS Cloud Environment"]
-        TargetALB["Target Application Load Balancer<br>(HTTP :80)"]
+    subgraph Target_Env ["Target AWS Cloud Environment"]
+        TargetALB["Target Application Load Balancer (HTTP :80)"]
         subgraph TargetVPC ["Target VPC (10.1.0.0/16)"]
-            MigratedNode1["Migrated Windows Node 01<br>(Launched Test/Cutover)"]
-            MigratedNode2["Migrated Linux Node 02<br>(Launched Test/Cutover)"]
+            MigratedNode1["Migrated Windows Node 01<br/>(Target Instance)"]
+            MigratedNode2["Migrated Linux Node 02<br/>(Target Instance)"]
         end
         TargetALB --> MigratedNode1
         TargetALB --> MigratedNode2
     end
 
-    Node1 -.->|Telemetry| ADS
-    Node2 -.->|Telemetry| ADS
-    Node1 ==>|Continuous Block-Level Replication (TCP 1500)| StagingArea
-    Node2 ==>|Continuous Block-Level Replication (TCP 1500)| StagingArea
-    StagingArea ==>|Launch Test / Cutover Instance| MigratedNode1
-    StagingArea ==>|Launch Test / Cutover Instance| MigratedNode2
+    Node1 -.->|"Telemetry"| ADS
+    Node2 -.->|"Telemetry"| ADS
+    Node1 ==>|"Continuous Block Replication (TCP 1500)"| RepServer1
+    Node2 ==>|"Continuous Block Replication (TCP 1500)"| RepServer1
+    StagingEBS1 ==>|"Launch Test / Cutover"| MigratedNode1
+    StagingEBS1 ==>|"Launch Test / Cutover"| MigratedNode2
 ```
 
 ---
