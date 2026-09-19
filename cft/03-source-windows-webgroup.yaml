@@ -21,22 +21,24 @@ Parameters:
 
   WindowsInstanceType:
     Type: String
-    Default: t3.medium
+    Default: t3.micro
     AllowedValues:
-      - t3.medium
-      - t3.large
-      - t3.xlarge
-      - m5.large
-    Description: EC2 Instance type for Windows node.
-
-  LinuxInstanceType:
-    Type: String
-    Default: t3.small
-    AllowedValues:
+      - t2.micro
       - t3.micro
       - t3.small
       - t3.medium
-    Description: EC2 Instance type for Linux node.
+      - t3.large
+    Description: EC2 Instance type for Windows node (use t2.micro or t3.micro for Free Tier).
+
+  LinuxInstanceType:
+    Type: String
+    Default: t3.micro
+    AllowedValues:
+      - t2.micro
+      - t3.micro
+      - t3.small
+      - t3.medium
+    Description: EC2 Instance type for Linux node (use t2.micro or t3.micro for Free Tier).
 
   KeyPairName:
     Type: String

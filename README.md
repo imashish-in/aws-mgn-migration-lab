@@ -56,6 +56,7 @@ flowchart TB
 .
 ├── README.md                              # This document: Architecture & summary
 ├── LAB_GUIDE_STEP_BY_STEP.md              # Detailed step-by-step tutorial guide
+├── CFT_ARCHITECTURE_REFERENCE.md          # In-depth reference for all CFT modules & resources
 ├── cft/                                   # Modular CloudFormation Templates
 │   ├── 01-networking.yaml                 # Dual-VPC setup (Source & Target VPCs, subnets, SGs)
 │   ├── 02-iam-roles.yaml                  # IAM roles, policies & agent installer user

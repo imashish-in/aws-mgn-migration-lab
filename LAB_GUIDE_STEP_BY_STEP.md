@@ -320,14 +320,14 @@ Configure how the target EC2 instances should be launched in the **Target VPC**:
    - Target VPC: `mgn-lab-target-vpc`.
    - Subnet: `mgn-lab-target-subnet-1`.
    - Security Groups: `mgn-lab-target-web-sg`.
-   - Instance Type: `t3.medium`.
+   - Instance Type: `t3.micro` (or `t2.micro` for Free Tier).
    - Save changes.
 2. Click on the **Linux Server**.
    - Go to **Launch settings** tab -> Click **Modify**.
    - Target VPC: `mgn-lab-target-vpc`.
    - Subnet: `mgn-lab-target-subnet-2`.
    - Security Groups: `mgn-lab-target-web-sg`.
-   - Instance Type: `t3.small` (or `t3.medium`).
+   - Instance Type: `t3.micro` (or `t2.micro` for Free Tier).
    - Save changes.
 
 ---
