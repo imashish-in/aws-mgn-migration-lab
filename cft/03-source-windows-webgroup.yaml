@@ -1,0 +1,340 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS MGN & ADS Lab - Module 03: Heterogeneous Web Group (1x Windows Server 2022 IIS + 1x Amazon Linux 2023 NGINX).
+  Deploys a multi-OS web cluster behind an Application Load Balancer with sample web apps.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: mgn-lab
+    Description: Prefix for resource naming.
+
+  WindowsAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base'
+    Description: SSM Parameter path to latest Windows Server 2022 Base AMI.
+
+  LinuxAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64'
+    Description: SSM Parameter path to latest Amazon Linux 2023 AMI.
+
+  WindowsInstanceType:
+    Type: String
+    Default: t3.medium
+    AllowedValues:
+      - t3.medium
+      - t3.large
+      - t3.xlarge
+      - m5.large
+    Description: EC2 Instance type for Windows node.
+
+  LinuxInstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+    Description: EC2 Instance type for Linux node.
+
+  KeyPairName:
+    Type: String
+    Default: ''
+    Description: (Optional) EC2 Key Pair name for SSH/RDP access. Leave blank if using SSM Session Manager.
+
+  SourceVpcId:
+    Type: String
+    Description: Source VPC ID (or imported from Module 01).
+    Default: ''
+
+  SourceSubnet1Id:
+    Type: String
+    Description: Source Public Subnet 1 ID.
+    Default: ''
+
+  SourceSubnet2Id:
+    Type: String
+    Description: Source Public Subnet 2 ID.
+    Default: ''
+
+  SourceWebSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Source Web Group.
+    Default: ''
+
+  SourceWindowsInstanceProfile:
+    Type: String
+    Description: IAM Instance Profile name for cluster instances.
+    Default: ''
+
+Conditions:
+  HasKeyPair: !Not [!Equals [!Ref KeyPairName, '']]
+  UseImportedVpc: !Equals [!Ref SourceVpcId, '']
+  UseImportedSubnet1: !Equals [!Ref SourceSubnet1Id, '']
+  UseImportedSubnet2: !Equals [!Ref SourceSubnet2Id, '']
+  UseImportedSG: !Equals [!Ref SourceWebSecurityGroupId, '']
+  UseImportedProfile: !Equals [!Ref SourceWindowsInstanceProfile, '']
+
+Resources:
+  # ==========================================
+  # Application Load Balancer for Source Web Group
+  # ==========================================
+  SourceWebALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${EnvironmentName}-source-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !If [UseImportedSubnet1, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceSubnet1Id'}, !Ref SourceSubnet1Id]
+        - !If [UseImportedSubnet2, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceSubnet2Id'}, !Ref SourceSubnet2Id]
+      SecurityGroups:
+        - !If [UseImportedSG, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceWebSecurityGroupId'}, !Ref SourceWebSecurityGroupId]
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-alb'
+
+  SourceWebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${EnvironmentName}-src-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !If [UseImportedVpc, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceVpcId'}, !Ref SourceVpcId]
+      TargetType: instance
+      HealthCheckPath: /health.html
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Targets:
+        - Id: !Ref WindowsNode1
+          Port: 80
+        - Id: !Ref LinuxNode2
+          Port: 80
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-target-group'
+
+  SourceWebALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref SourceWebALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref SourceWebTargetGroup
+
+  # ==========================================
+  # Source Node 1: Windows Server 2022 (IIS)
+  # ==========================================
+  WindowsNode1:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAmiId
+      InstanceType: !Ref WindowsInstanceType
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      IamInstanceProfile: !If [UseImportedProfile, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceWindowsInstanceProfileName'}, !Ref SourceWindowsInstanceProfile]
+      SubnetId: !If [UseImportedSubnet1, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceSubnet1Id'}, !Ref SourceSubnet1Id]
+      SecurityGroupIds:
+        - !If [UseImportedSG, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceWebSecurityGroupId'}, !Ref SourceWebSecurityGroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 60
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          <powershell>
+          # Enable TLS 1.2
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+          # Install IIS and Management Tools
+          Install-WindowsFeature -name Web-Server, Web-Common-Http, Web-Default-Doc, Web-Dir-Browsing, Web-Http-Errors, Web-Static-Content, Web-Http-Redirect, Web-Health, Web-Http-Logging, Web-Log-Libraries, Web-Request-Monitor, Web-Http-Tracing, Web-Security, Web-Filtering, Web-Basic-Auth, Web-Windows-Auth, Web-App-Dev, Web-Net-Ext45, Web-Asp-Net45, Web-ISAPI-Ext, Web-ISAPI-Filter, Web-Mgmt-Tools, Web-Mgmt-Console -IncludeManagementTools
+
+          # Create directory structure
+          New-Item -Path "C:\inetpub\wwwroot\images" -ItemType Directory -Force
+          New-Item -Path "C:\lab-scripts" -ItemType Directory -Force
+
+          # Create Health check file
+          Set-Content -Path "C:\inetpub\wwwroot\health.html" -Value "OK - Node-01 (Windows) - $($env:COMPUTERNAME)"
+
+          # Create Sample Clustered Web Application HTML
+          $htmlContent = @"
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <title>Enterprise Web Group - Node 01 (Windows)</title>
+              <style>
+                  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 40px; display: flex; justify-content: center; }
+                  .card { background: #1e293b; border-radius: 12px; padding: 32px; max-width: 650px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+                  .badge { background: #3b82f6; color: white; padding: 6px 14px; border-radius: 9999px; font-weight: 600; font-size: 0.85rem; display: inline-block; margin-bottom: 16px; }
+                  h1 { margin: 0 0 10px; font-size: 1.8rem; color: #38bdf8; }
+                  p { color: #94a3b8; line-height: 1.6; }
+                  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+                  .info-box { background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; }
+                  .info-box span { font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: bold; }
+                  .info-box div { font-size: 1.05rem; color: #f1f5f9; margin-top: 4px; font-weight: 500; word-break: break-all; }
+                  .status-pill { display: inline-flex; align-items: center; color: #22c55e; font-weight: bold; }
+                  .status-pill::before { content: ''; width: 10px; height: 10px; background: #22c55e; border-radius: 50%; margin-right: 8px; }
+              </style>
+          </head>
+          <body>
+              <div class="card">
+                  <div class="badge">Simulated On-Premises Source</div>
+                  <h1>Enterprise Web Group Cluster</h1>
+                  <p>This Windows Server node is actively serving live web traffic and is ready for Discovery & AWS MGN Migration.</p>
+                  <div class="grid">
+                      <div class="info-box">
+                          <span>Cluster Node</span>
+                          <div style="color: #38bdf8; font-weight: 700;">Node-01 (Windows Server)</div>
+                      </div>
+                      <div class="info-box">
+                          <span>Status</span>
+                          <div class="status-pill">Active & Healthy</div>
+                      </div>
+                      <div class="info-box">
+                          <span>Hostname</span>
+                          <div>$($env:COMPUTERNAME)</div>
+                      </div>
+                      <div class="info-box">
+                          <span>OS Version</span>
+                          <div>Windows Server 2022 Datacenter</div>
+                      </div>
+                  </div>
+              </div>
+          </body>
+          </html>
+          "@
+          Set-Content -Path "C:\inetpub\wwwroot\index.html" -Value $htmlContent
+
+          # Restart IIS
+          iisreset
+          </powershell>
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-web-node-01-windows'
+        - Key: Role
+          Value: WebClusterNode
+        - Key: OSType
+          Value: Windows
+        - Key: NodeId
+          Value: Node-01
+
+  # ==========================================
+  # Source Node 2: Linux (Amazon Linux 2023 - NGINX)
+  # ==========================================
+  LinuxNode2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LinuxAmiId
+      InstanceType: !Ref LinuxInstanceType
+      KeyName: !If [HasKeyPair, !Ref KeyPairName, !Ref 'AWS::NoValue']
+      IamInstanceProfile: !If [UseImportedProfile, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceWindowsInstanceProfileName'}, !Ref SourceWindowsInstanceProfile]
+      SubnetId: !If [UseImportedSubnet2, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceSubnet2Id'}, !Ref SourceSubnet2Id]
+      SecurityGroupIds:
+        - !If [UseImportedSG, !ImportValue {'Fn::Sub': '${EnvironmentName}-SourceWebSecurityGroupId'}, !Ref SourceWebSecurityGroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 20
+            VolumeType: gp3
+            DeleteOnTermination: true
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          dnf update -y
+          dnf install -y nginx python3-pip
+
+          mkdir -p /usr/share/nginx/html
+          echo "OK - Node-02 (Linux) - $(hostname)" > /usr/share/nginx/html/health.html
+
+          cat << 'EOF' > /usr/share/nginx/html/index.html
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <title>Enterprise Web Group - Node 02 (Linux)</title>
+              <style>
+                  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 40px; display: flex; justify-content: center; }
+                  .card { background: #1e293b; border-radius: 12px; padding: 32px; max-width: 650px; width: 100%; box-shadow: 0 10px 25px rgba(0,0,0,0.5); border: 1px solid #334155; }
+                  .badge { background: #10b981; color: white; padding: 6px 14px; border-radius: 9999px; font-weight: 600; font-size: 0.85rem; display: inline-block; margin-bottom: 16px; }
+                  h1 { margin: 0 0 10px; font-size: 1.8rem; color: #34d399; }
+                  p { color: #94a3b8; line-height: 1.6; }
+                  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+                  .info-box { background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; }
+                  .info-box span { font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: bold; }
+                  .info-box div { font-size: 1.05rem; color: #f1f5f9; margin-top: 4px; font-weight: 500; word-break: break-all; }
+                  .status-pill { display: inline-flex; align-items: center; color: #22c55e; font-weight: bold; }
+                  .status-pill::before { content: ''; width: 10px; height: 10px; background: #22c55e; border-radius: 50%; margin-right: 8px; }
+              </style>
+          </head>
+          <body>
+              <div class="card">
+                  <div class="badge">Simulated On-Premises Source</div>
+                  <h1>Enterprise Web Group Cluster</h1>
+                  <p>This Linux Server node is actively serving live web traffic and is ready for Discovery & AWS MGN Migration.</p>
+                  <div class="grid">
+                      <div class="info-box">
+                          <span>Cluster Node</span>
+                          <div style="color: #34d399; font-weight: 700;">Node-02 (Amazon Linux 2023)</div>
+                      </div>
+                      <div class="info-box">
+                          <span>Status</span>
+                          <div class="status-pill">Active & Healthy</div>
+                      </div>
+                      <div class="info-box">
+                          <span>Web Server</span>
+                          <div>NGINX 1.24 (Port 80)</div>
+                      </div>
+                      <div class="info-box">
+                          <span>OS Version</span>
+                          <div>Amazon Linux 2023 (AL2023)</div>
+                      </div>
+                  </div>
+              </div>
+          </body>
+          </html>
+          EOF
+
+          systemctl enable nginx
+          systemctl restart nginx
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-web-node-02-linux'
+        - Key: Role
+          Value: WebClusterNode
+        - Key: OSType
+          Value: Linux
+        - Key: NodeId
+          Value: Node-02
+
+Outputs:
+  WebGroupAlbDnsName:
+    Description: DNS Name of the Source Web Group ALB
+    Value: !GetAtt SourceWebALB.DNSName
+
+  WebGroupAlbUrl:
+    Description: HTTP URL to test the Source Web Group
+    Value: !Sub 'http://${SourceWebALB.DNSName}'
+
+  WindowsNode1InstanceId:
+    Description: Instance ID of Windows Web Node 1
+    Value: !Ref WindowsNode1
+
+  WindowsNode1PublicIp:
+    Description: Public IP of Windows Web Node 1
+    Value: !GetAtt WindowsNode1.PublicIp
+
+  LinuxNode2InstanceId:
+    Description: Instance ID of Linux Web Node 2
+    Value: !Ref LinuxNode2
+
+  LinuxNode2PublicIp:
+    Description: Public IP of Linux Web Node 2
+    Value: !GetAtt LinuxNode2.PublicIp

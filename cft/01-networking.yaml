@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS MGN & ADS Lab - Module 01: Dual-VPC Networking Architecture.
+  Deploys a Source VPC (simulating On-Premises Web Cluster) and a Target VPC (Target Cloud Environment).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: mgn-lab
+    Description: Prefix for resource naming.
+
+  SourceVpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: CIDR block for the Source (Simulated On-Premises) VPC.
+
+  SourcePublicSubnet1Cidr:
+    Type: String
+    Default: 10.0.1.0/24
+    Description: CIDR block for Source Public Subnet 1.
+
+  SourcePublicSubnet2Cidr:
+    Type: String
+    Default: 10.0.2.0/24
+    Description: CIDR block for Source Public Subnet 2.
+
+  TargetVpcCidr:
+    Type: String
+    Default: 10.1.0.0/16
+    Description: CIDR block for the Target (Cloud) VPC.
+
+  TargetSubnet1Cidr:
+    Type: String
+    Default: 10.1.1.0/24
+    Description: CIDR block for Target Subnet 1.
+
+  TargetSubnet2Cidr:
+    Type: String
+    Default: 10.1.2.0/24
+    Description: CIDR block for Target Subnet 2.
+
+Resources:
+  # ==========================================
+  # SOURCE VPC (Simulated On-Premises Web Group)
+  # ==========================================
+  SourceVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref SourceVpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-vpc'
+        - Key: Environment
+          Value: Simulated-OnPrem
+
+  SourceInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-igw'
+
+  SourceAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref SourceVPC
+      InternetGatewayId: !Ref SourceInternetGateway
+
+  SourcePublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SourceVPC
+      CidrBlock: !Ref SourcePublicSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-public-subnet-1'
+
+  SourcePublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref SourceVPC
+      CidrBlock: !Ref SourcePublicSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-public-subnet-2'
+
+  SourcePublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref SourceVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-public-rt'
+
+  SourcePublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: SourceAttachGateway
+    Properties:
+      RouteTableId: !Ref SourcePublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref SourceInternetGateway
+
+  SourceSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SourcePublicSubnet1
+      RouteTableId: !Ref SourcePublicRouteTable
+
+  SourceSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SourcePublicSubnet2
+      RouteTableId: !Ref SourcePublicRouteTable
+
+  # Security Group for Source Web Group
+  SourceWebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-source-web-sg'
+      GroupDescription: Security group for source Windows web cluster nodes
+      VpcId: !Ref SourceVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH access for Linux
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+          Description: Allow RDP access for Windows admin
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTPS outbound/inbound for discovery & replication agents
+        - IpProtocol: tcp
+          FromPort: 1500
+          ToPort: 1500
+          CidrIp: 0.0.0.0/0
+          Description: AWS MGN Replication Port (TCP 1500 outbound)
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound traffic
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-web-sg'
+
+  # ==========================================
+  # TARGET VPC (Target Cloud Destination)
+  # ==========================================
+  TargetVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: !Ref TargetVpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-vpc'
+        - Key: Environment
+          Value: Target-Cloud
+
+  TargetInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-igw'
+
+  TargetAttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref TargetVPC
+      InternetGatewayId: !Ref TargetInternetGateway
+
+  TargetSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref TargetVPC
+      CidrBlock: !Ref TargetSubnet1Cidr
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-subnet-1'
+
+  TargetSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref TargetVPC
+      CidrBlock: !Ref TargetSubnet2Cidr
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-subnet-2'
+
+  TargetRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref TargetVPC
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-rt'
+
+  TargetDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: TargetAttachGateway
+    Properties:
+      RouteTableId: !Ref TargetRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref TargetInternetGateway
+
+  TargetSubnet1RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref TargetSubnet1
+      RouteTableId: !Ref TargetRouteTable
+
+  TargetSubnet2RouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref TargetSubnet2
+      RouteTableId: !Ref TargetRouteTable
+
+  # Security Group for Target Migrated Instances
+  TargetWebSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub '${EnvironmentName}-target-web-sg'
+      GroupDescription: Security group for target migrated Windows web instances
+      VpcId: !Ref TargetVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Allow HTTP traffic
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: Allow SSH access for Linux
+        - IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: 0.0.0.0/0
+          Description: Allow RDP management for Windows
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+          Description: Allow all outbound
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-web-sg'
+
+Outputs:
+  SourceVpcId:
+    Description: Source Simulated On-Premises VPC ID
+    Value: !Ref SourceVPC
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceVpcId'
+
+  SourcePublicSubnet1Id:
+    Description: Source Public Subnet 1 ID
+    Value: !Ref SourcePublicSubnet1
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceSubnet1Id'
+
+  SourcePublicSubnet2Id:
+    Description: Source Public Subnet 2 ID
+    Value: !Ref SourcePublicSubnet2
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceSubnet2Id'
+
+  SourceWebSecurityGroupId:
+    Description: Source Web Security Group ID
+    Value: !Ref SourceWebSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceWebSecurityGroupId'
+
+  TargetVpcId:
+    Description: Target Cloud VPC ID
+    Value: !Ref TargetVPC
+    Export:
+      Name: !Sub '${EnvironmentName}-TargetVpcId'
+
+  TargetSubnet1Id:
+    Description: Target Subnet 1 ID
+    Value: !Ref TargetSubnet1
+    Export:
+      Name: !Sub '${EnvironmentName}-TargetSubnet1Id'
+
+  TargetSubnet2Id:
+    Description: Target Subnet 2 ID
+    Value: !Ref TargetSubnet2
+    Export:
+      Name: !Sub '${EnvironmentName}-TargetSubnet2Id'
+
+  TargetWebSecurityGroupId:
+    Description: Target Web Security Group ID
+    Value: !Ref TargetWebSecurityGroup
+    Export:
+      Name: !Sub '${EnvironmentName}-TargetWebSecurityGroupId'

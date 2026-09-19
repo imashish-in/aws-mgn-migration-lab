@@ -1,0 +1,104 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS MGN & ADS Lab - Module 02: IAM Roles, Policies, and Instance Profiles.
+  Creates the IAM resources for Windows EC2 instances (SSM, Discovery) and MGN agent installation.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: mgn-lab
+    Description: Prefix for resource naming.
+
+Resources:
+  # ==========================================
+  # IAM Role for Source Windows Web Cluster EC2
+  # ==========================================
+  SourceWindowsEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${EnvironmentName}-source-windows-ec2-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy
+      Policies:
+        - PolicyName: DiscoveryAndMGNInstallationHelper
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - discovery:StartDataCollectionByAgentIds
+                  - discovery:StopDataCollectionByAgentIds
+                  - discovery:DescribeAgents
+                  - discovery:AssociateConfigurationItemsToApplication
+                  - mgn:*
+                  - s3:GetObject
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-source-windows-ec2-role'
+
+  SourceWindowsEC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub '${EnvironmentName}-source-windows-instance-profile'
+      Roles:
+        - !Ref SourceWindowsEC2Role
+
+  # ==========================================
+  # Dedicated IAM User for Agent Install (Best Practice for MGN/ADS)
+  # ==========================================
+  MigrationAgentInstallerUser:
+    Type: AWS::IAM::User
+    Properties:
+      UserName: !Sub '${EnvironmentName}-agent-installer'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSApplicationMigrationAgentInstallationPolicy
+      Policies:
+        - PolicyName: DiscoveryAgentInstallationPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - discovery:StartDataCollectionByAgentIds
+                  - discovery:DescribeAgents
+                  - discovery:RegisterAgent
+                Resource: '*'
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-agent-installer'
+
+Outputs:
+  SourceWindowsInstanceProfileArn:
+    Description: Instance Profile ARN for Source Windows Instances
+    Value: !GetAtt SourceWindowsEC2InstanceProfile.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceWindowsInstanceProfileArn'
+
+  SourceWindowsInstanceProfileName:
+    Description: Instance Profile Name for Source Windows Instances
+    Value: !Ref SourceWindowsEC2InstanceProfile
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceWindowsInstanceProfileName'
+
+  SourceWindowsEC2RoleArn:
+    Description: IAM Role ARN for Source Windows Instances
+    Value: !GetAtt SourceWindowsEC2Role.Arn
+    Export:
+      Name: !Sub '${EnvironmentName}-SourceWindowsEC2RoleArn'
+
+  AgentInstallerUserName:
+    Description: Dedicated IAM User for Discovery & MGN Agent Installation
+    Value: !Ref MigrationAgentInstallerUser
+    Export:
+      Name: !Sub '${EnvironmentName}-AgentInstallerUserName'

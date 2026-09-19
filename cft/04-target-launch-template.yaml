@@ -1,0 +1,124 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  AWS MGN & ADS Lab - Module 04: Target Cloud Launch Template & Load Balancer.
+  Provisions the target ALB and Launch Template for post-migration cutover.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: mgn-lab
+    Description: Prefix for resource naming.
+
+  TargetVpcId:
+    Type: String
+    Description: Target VPC ID (or imported from Module 01).
+    Default: ''
+
+  TargetSubnet1Id:
+    Type: String
+    Description: Target Subnet 1 ID.
+    Default: ''
+
+  TargetSubnet2Id:
+    Type: String
+    Description: Target Subnet 2 ID.
+    Default: ''
+
+  TargetWebSecurityGroupId:
+    Type: String
+    Description: Security Group ID for Target Web Group.
+    Default: ''
+
+  TargetInstanceType:
+    Type: String
+    Default: t3.medium
+    Description: EC2 Instance Type for migrated target instances.
+
+Conditions:
+  UseImportedVpc: !Equals [!Ref TargetVpcId, '']
+  UseImportedSubnet1: !Equals [!Ref TargetSubnet1Id, '']
+  UseImportedSubnet2: !Equals [!Ref TargetSubnet2Id, '']
+  UseImportedSG: !Equals [!Ref TargetWebSecurityGroupId, '']
+
+Resources:
+  # ==========================================
+  # Target Application Load Balancer
+  # ==========================================
+  TargetWebALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub '${EnvironmentName}-target-alb'
+      Scheme: internet-facing
+      Type: application
+      Subnets:
+        - !If [UseImportedSubnet1, !ImportValue {'Fn::Sub': '${EnvironmentName}-TargetSubnet1Id'}, !Ref TargetSubnet1Id]
+        - !If [UseImportedSubnet2, !ImportValue {'Fn::Sub': '${EnvironmentName}-TargetSubnet2Id'}, !Ref TargetSubnet2Id]
+      SecurityGroups:
+        - !If [UseImportedSG, !ImportValue {'Fn::Sub': '${EnvironmentName}-TargetWebSecurityGroupId'}, !Ref TargetWebSecurityGroupId]
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-alb'
+
+  TargetWebTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: !Sub '${EnvironmentName}-tgt-tg'
+      Port: 80
+      Protocol: HTTP
+      VpcId: !If [UseImportedVpc, !ImportValue {'Fn::Sub': '${EnvironmentName}-TargetVpcId'}, !Ref TargetVpcId]
+      TargetType: instance
+      HealthCheckPath: /health.html
+      HealthCheckProtocol: HTTP
+      HealthCheckIntervalSeconds: 15
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Tags:
+        - Key: Name
+          Value: !Sub '${EnvironmentName}-target-target-group'
+
+  TargetWebALBListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref TargetWebALB
+      Port: 80
+      Protocol: HTTP
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref TargetWebTargetGroup
+
+  # ==========================================
+  # Launch Template for MGN Target Configuration
+  # ==========================================
+  TargetLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateName: !Sub '${EnvironmentName}-mgn-target-template'
+      LaunchTemplateData:
+        InstanceType: !Ref TargetInstanceType
+        SecurityGroupIds:
+          - !If [UseImportedSG, !ImportValue {'Fn::Sub': '${EnvironmentName}-TargetWebSecurityGroupId'}, !Ref TargetWebSecurityGroupId]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: !Sub '${EnvironmentName}-migrated-node'
+              - Key: MigrationStatus
+                Value: MigratedWithMGN
+
+Outputs:
+  TargetAlbDnsName:
+    Description: DNS Name of the Target Web Group ALB
+    Value: !GetAtt TargetWebALB.DNSName
+
+  TargetAlbUrl:
+    Description: Target Web URL (access after cutover instances are registered)
+    Value: !Sub 'http://${TargetWebALB.DNSName}'
+
+  TargetTargetGroupArn:
+    Description: ARN of Target Group to register migrated instances into
+    Value: !Ref TargetWebTargetGroup
+
+  TargetLaunchTemplateId:
+    Description: Launch Template ID configured for MGN target launches
+    Value: !Ref TargetLaunchTemplate
